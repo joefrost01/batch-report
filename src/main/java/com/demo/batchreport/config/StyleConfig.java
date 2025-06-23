@@ -121,7 +121,7 @@ public class StyleConfig {
                 "            transition: max-height 0.3s ease;\n" +
                 "        }\n" +
                 "        .collapsible-content.collapsed {\n" +
-                "            max-height: 0;\n" +
+                "            max-height: 0 !important;\n" +
                 "            padding: 0 30px;\n" +
                 "        }\n" +
                 "        .table-container {\n" +
@@ -230,40 +230,6 @@ public class StyleConfig {
                 "                padding: 8px 6px;\n" +
                 "                font-size: 12px;\n" +
                 "            }\n" +
-                "        }\n" +
-                "        \n" +
-                "        /* JavaScript-free collapsible fallback */\n" +
-                "        details summary {\n" +
-                "            cursor: pointer;\n" +
-                "            padding: 20px 30px;\n" +
-                "            background-color: #f8f9fa;\n" +
-                "            border-bottom: 2px solid #00A693;\n" +
-                "            font-size: 20px;\n" +
-                "            font-weight: bold;\n" +
-                "            color: #006A4E;\n" +
-                "        }\n" +
-                "        details summary:hover {\n" +
-                "            background-color: #f0f9f6;\n" +
-                "        }\n" +
-                "        details[open] summary {\n" +
-                "            border-bottom: none;\n" +
-                "        }\n" +
-                "        \n" +
-                "        /* Toggle function for email clients that support JavaScript */\n" +
-                "        <script>\n" +
-                "        function toggleSection(contentId) {\n" +
-                "            var content = document.getElementById(contentId);\n" +
-                "            var indicator = content.previousElementSibling.querySelector('.toggle-indicator');\n" +
-                "            \n" +
-                "            if (content.classList.contains('collapsed')) {\n" +
-                "                content.classList.remove('collapsed');\n" +
-                "                if (indicator) indicator.innerHTML = '▼';\n" +
-                "            } else {\n" +
-                "                content.classList.add('collapsed');\n" +
-                "                if (indicator) indicator.innerHTML = '▶';\n" +
-                "            }\n" +
-                "        }\n" +
-                "        </script>";
+                "        }";
     }
-
 }

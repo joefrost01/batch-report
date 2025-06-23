@@ -2,6 +2,7 @@ package com.demo.batchreport.service;
 
 import com.demo.batchreport.config.Config;
 import com.demo.batchreport.config.ExpectedScenariosConfig;
+import com.demo.batchreport.config.StyleConfig;
 import com.demo.batchreport.domain.*;
 import com.demo.batchreport.repository.BatchQueryRepository;
 import lombok.RequiredArgsConstructor;
@@ -30,8 +31,6 @@ import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.demo.batchreport.config.StyleConfig.getStyles;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -44,6 +43,12 @@ public class BatchReportService {
     public void sendBatchReport(LocalDate batchDate) {
         try {
             List<BatchRecord> batchRecords = batchQueryRepository.findAllByBatchDate(batchDate);
+
+            // Add simulated data if no real data exists (for demo purposes)
+            if (batchRecords.isEmpty()) {
+                batchRecords = generateSimulatedBatchRecords(batchDate);
+            }
+
             List<BatchSummary> summaryData = generateSummaryDataWithExpectations(batchRecords);
             List<ScenarioDetail> scenarioDetails = generateScenarioDetails(batchRecords);
             List<BatchStatusCount> statusCounts = findStatusCountsForLast120Days(batchDate);
@@ -65,6 +70,35 @@ public class BatchReportService {
         }
     }
 
+    /**
+     * Generate simulated batch records for demo purposes when no real data exists
+     */
+    private List<BatchRecord> generateSimulatedBatchRecords(LocalDate batchDate) {
+        Random random = new Random(batchDate.toEpochDay()); // Consistent seed for same date
+
+        List<BatchRecord> simulatedRecords = new ArrayList<>();
+        List<ExpectedScenariosConfig.ExpectedScenario> allExpected = ExpectedScenariosConfig.getAllExpectedScenarios();
+
+        // Randomly load 75-90% of expected scenarios
+        double loadRate = 0.75 + (random.nextDouble() * 0.15);
+
+        for (ExpectedScenariosConfig.ExpectedScenario expected : allExpected) {
+            if (random.nextDouble() < loadRate) {
+                simulatedRecords.add(new BatchRecord(
+                    null,
+                    expected.getAssetClass(),
+                    expected.getProduct(),
+                    expected.getScenario(),
+                    expected.getEntity(),
+                    batchDate
+                ));
+            }
+        }
+
+        log.info("Generated {} simulated batch records for date: {}", simulatedRecords.size(), batchDate);
+        return simulatedRecords;
+    }
+
     public List<BatchStatusCount> findStatusCountsForLast120Days(LocalDate endDate) {
         LocalDate startDate = endDate.minusDays(119);
         List<BatchRecord> records = batchQueryRepository.findAllByBatchDateBetween(startDate, endDate);
@@ -76,12 +110,41 @@ public class BatchReportService {
                         Collectors.counting()
                 ));
 
+        // If no real data, generate simulated data for the chart
+        if (countsByDate.isEmpty()) {
+            return generateSimulatedStatusCounts(endDate);
+        }
+
         // Generate full 120-day range
         List<BatchStatusCount> statusCounts = new ArrayList<>();
         for (int i = 119; i >= 0; i--) {
             LocalDate date = endDate.minusDays(i);
             Long loadedCount = countsByDate.getOrDefault(date, 0L);
             Long missingCount = loadedCount == 0 ? 1L : 0L;
+
+            statusCounts.add(new BatchStatusCount(date, loadedCount, missingCount));
+        }
+
+        return statusCounts;
+    }
+
+    /**
+     * Generate simulated status counts for demo purposes
+     */
+    private List<BatchStatusCount> generateSimulatedStatusCounts(LocalDate endDate) {
+        List<BatchStatusCount> statusCounts = new ArrayList<>();
+        Random random = new Random(endDate.toEpochDay());
+
+        for (int i = 119; i >= 0; i--) {
+            LocalDate date = endDate.minusDays(i);
+
+            // Simulate realistic data - most days have loads, some are missing
+            long loadedCount = random.nextInt(60) + 40; // 40-99 loads
+            long missingCount = random.nextDouble() < 0.15 ? 1 : 0; // 15% chance of missing
+
+            if (missingCount == 1) {
+                loadedCount = 0; // If missing, no loads
+            }
 
             statusCounts.add(new BatchStatusCount(date, loadedCount, missingCount));
         }
@@ -101,6 +164,11 @@ public class BatchReportService {
         // In production, you'd add a created_date/loaded_date timestamp column to BatchRecord
         List<BatchRecord> allRecentRecords = batchQueryRepository.findAllByBatchDateBetween(lookbackDate, currentBatchDate.minusDays(1));
 
+        // If no real data, generate simulated backdated scenarios
+        if (allRecentRecords.isEmpty()) {
+            return generateSimulatedBackdatedScenarios(currentBatchDate);
+        }
+
         // Simulate backdated scenarios (in production, filter by created_date > currentBatchDate.minusDays(7))
         return allRecentRecords.stream()
                 .filter(record -> record.getBatchDate().isBefore(currentBatchDate.minusDays(1)))
@@ -117,14 +185,55 @@ public class BatchReportService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Generate simulated backdated scenarios for demo purposes
+     */
+    private List<BackdatedScenario> generateSimulatedBackdatedScenarios(LocalDate currentBatchDate) {
+        List<BackdatedScenario> backdatedScenarios = new ArrayList<>();
+        Random random = new Random(currentBatchDate.toEpochDay());
+
+        // Generate 3-8 backdated scenarios
+        int count = 3 + random.nextInt(6);
+
+        String[] assetClasses = {"Equity", "Fixed Income", "Derivatives"};
+        String[] products = {"US Large Cap", "Corporate Bonds", "Interest Rate"};
+        String[] entities = {"Entity A", "Entity B", "Entity C"};
+        String[] scenarios = {"Base", "Stress", "Adverse"};
+
+        for (int i = 0; i < count; i++) {
+            // Create scenarios 2-10 days old that were "loaded" 1-3 days ago
+            LocalDate batchDate = currentBatchDate.minusDays(2 + random.nextInt(9));
+            LocalDate loadedDate = currentBatchDate.minusDays(1 + random.nextInt(3));
+
+            backdatedScenarios.add(new BackdatedScenario(
+                assetClasses[random.nextInt(assetClasses.length)],
+                products[random.nextInt(products.length)],
+                scenarios[random.nextInt(scenarios.length)],
+                entities[random.nextInt(entities.length)],
+                batchDate,
+                loadedDate
+            ));
+        }
+
+        return backdatedScenarios.stream()
+                .sorted((a, b) -> b.getLoadedDate().compareTo(a.getLoadedDate()))
+                .collect(Collectors.toList());
+    }
+
     public String generateBatchReportHtml(LocalDate batchDate, List<BatchRecord> batchRecords, List<BatchStatusCount> statusCounts) {
+        // Add simulated data if needed
+        if (batchRecords.isEmpty()) {
+            batchRecords = generateSimulatedBatchRecords(batchDate);
+        }
+        if (statusCounts.isEmpty()) {
+            statusCounts = generateSimulatedStatusCounts(batchDate);
+        }
+
         List<BatchSummary> summaryData = generateSummaryDataWithExpectations(batchRecords);
         List<ScenarioDetail> scenarioDetails = generateScenarioDetails(batchRecords);
         List<BackdatedScenario> backdatedScenarios = findRecentlyLoadedBackdatedScenarios(batchDate);
         return buildBatchReportEmail(batchDate, summaryData, scenarioDetails, statusCounts, backdatedScenarios);
     }
-
-    // ... [Keep all existing private methods for generateSummaryDataWithExpectations, generateScenarioDetails, etc.]
 
     private String buildBatchReportEmail(LocalDate batchDate, List<BatchSummary> summaryData,
                                          List<ScenarioDetail> scenarioDetails, List<BatchStatusCount> statusCounts,
@@ -151,7 +260,7 @@ public class BatchReportService {
                 .append("    <meta charset=\"UTF-8\">\n")
                 .append("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
                 .append("    <style>\n")
-                .append(getStyles())
+                .append(StyleConfig.getStyles())
                 .append("    </style>\n")
                 .append("</head>\n")
                 .append("<body>\n")
@@ -178,6 +287,25 @@ public class BatchReportService {
                 .append("            <p>For questions or issues, please contact the Trade Surveillance dev team via the Teams channel.</p>\n")
                 .append("        </div>\n")
                 .append("    </div>\n")
+
+                // Add JavaScript at the bottom for better compatibility
+                .append("    <script>\n")
+                .append("        function toggleSection(contentId) {\n")
+                .append("            var content = document.getElementById(contentId);\n")
+                .append("            var header = content.previousElementSibling;\n")
+                .append("            var indicator = header.querySelector('.toggle-indicator');\n")
+                .append("            \n")
+                .append("            if (content.classList.contains('collapsed')) {\n")
+                .append("                content.classList.remove('collapsed');\n")
+                .append("                content.style.maxHeight = 'none';\n")
+                .append("                if (indicator) indicator.innerHTML = '▼';\n")
+                .append("            } else {\n")
+                .append("                content.classList.add('collapsed');\n")
+                .append("                content.style.maxHeight = '0';\n")
+                .append("                if (indicator) indicator.innerHTML = '▶';\n")
+                .append("            }\n")
+                .append("        }\n")
+                .append("    </script>\n")
                 .append("</body>\n")
                 .append("</html>");
 
@@ -195,7 +323,7 @@ public class BatchReportService {
                 "        <a href=\"#backdated\" class=\"nav-link\">🔄 Recent Backdated</a>\n" +
                 "    </div>\n" +
                 "    <div class=\"collapsible-note\">\n" +
-                "        <small>💡 Tip: Click section headers to expand/collapse content in supported email clients</small>\n" +
+                "        <small>💡 Tip: Click section headers to expand/collapse content</small>\n" +
                 "    </div>\n" +
                 "</div>\n";
     }
@@ -290,8 +418,8 @@ public class BatchReportService {
     private String buildDetailSection(List<ScenarioDetail> scenarioDetails) {
         if (scenarioDetails.isEmpty()) {
             return "<div id=\"details\" class=\"section collapsible\">\n" +
-                    "    <h2 class=\"collapsible-header\" onclick=\"toggleSection('details-content')\">📄 Scenario Details <span class=\"toggle-indicator\">▼</span></h2>\n" +
-                    "    <div id=\"details-content\" class=\"collapsible-content\">\n" +
+                    "    <h2 class=\"collapsible-header\" onclick=\"toggleSection('details-content')\">📄 Scenario Details <span class=\"toggle-indicator\">▶</span></h2>\n" +
+                    "    <div id=\"details-content\" class=\"collapsible-content collapsed\">\n" +
                     "        <div class=\"empty-state\">No scenario details available</div>\n" +
                     "    </div>\n" +
                     "</div>\n";
@@ -299,8 +427,8 @@ public class BatchReportService {
 
         StringBuilder section = new StringBuilder();
         section.append("<div id=\"details\" class=\"section collapsible\">\n")
-                .append("    <h2 class=\"collapsible-header\" onclick=\"toggleSection('details-content')\">📄 Scenario Details <span class=\"toggle-indicator\">▼</span></h2>\n")
-                .append("    <div id=\"details-content\" class=\"collapsible-content collapsed\">\n") // Start collapsed for long tables
+                .append("    <h2 class=\"collapsible-header\" onclick=\"toggleSection('details-content')\">📄 Scenario Details <span class=\"toggle-indicator\">▶</span></h2>\n")
+                .append("    <div id=\"details-content\" class=\"collapsible-content collapsed\" style=\"max-height: 0;\">\n") // Start collapsed for long tables
                 .append("        <div class=\"table-container\">\n")
                 .append("            <table>\n")
                 .append("                <thead>\n")
@@ -605,7 +733,6 @@ public class BatchReportService {
 
         return tempFile.toFile();
     }
-
 
     private void styleStatusChart(JFreeChart chart) {
         chart.setBackgroundPaint(Color.WHITE);
