@@ -55,7 +55,9 @@ public class BatchReportService {
             List<BackdatedScenario> backdatedScenarios = findRecentlyLoadedBackdatedScenarios(batchDate);
 
             File chartFile = generateStatusChart(statusCounts);
-            String htmlContent = buildBatchReportEmail(batchDate, summaryData, scenarioDetails, statusCounts, backdatedScenarios);
+
+            // Use email-optimized HTML instead of regular HTML
+            String htmlContent = buildEmailOptimizedReport(batchDate, summaryData, scenarioDetails, statusCounts, backdatedScenarios);
 
             sendEmail(buildSubject(batchDate), htmlContent, chartFile);
 
@@ -68,6 +70,375 @@ public class BatchReportService {
             log.error("Failed to send batch report for date: {}", batchDate, e);
             throw new RuntimeException("Batch report generation failed", e);
         }
+    }
+
+// Add these methods to your BatchReportService class
+
+    /**
+     * Generate email-optimized HTML that works better in email clients
+     */
+    public String generateEmailOptimizedHtml(LocalDate batchDate, List<BatchRecord> batchRecords,
+                                             List<BatchStatusCount> statusCounts) {
+        // Add simulated data if needed
+        if (batchRecords.isEmpty()) {
+            batchRecords = generateSimulatedBatchRecords(batchDate);
+        }
+        if (statusCounts.isEmpty()) {
+            statusCounts = generateSimulatedStatusCounts(batchDate);
+        }
+
+        List<BatchSummary> summaryData = generateSummaryDataWithExpectations(batchRecords);
+        List<ScenarioDetail> scenarioDetails = generateScenarioDetails(batchRecords);
+        List<BackdatedScenario> backdatedScenarios = findRecentlyLoadedBackdatedScenarios(batchDate);
+
+        return buildEmailOptimizedReport(batchDate, summaryData, scenarioDetails, statusCounts, backdatedScenarios);
+    }
+
+    private String buildEmailOptimizedReport(LocalDate batchDate, List<BatchSummary> summaryData,
+                                             List<ScenarioDetail> scenarioDetails, List<BatchStatusCount> statusCounts,
+                                             List<BackdatedScenario> backdatedScenarios) {
+
+        String formattedDate = batchDate.format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));
+        String timestamp = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));
+
+        // Calculate statistics
+        long totalLoaded = summaryData.stream().mapToLong(BatchSummary::getLoadCount).sum();
+        long totalExpected = summaryData.stream().mapToLong(BatchSummary::getExpectedCount).sum();
+        long completeSummaries = summaryData.stream().mapToLong(s -> s.isComplete() ? 1 : 0).sum();
+        long missingScenarios = scenarioDetails.stream().mapToLong(s -> s.getStatus() == ScenarioDetail.ScenarioStatus.MISSING ? 1 : 0).sum();
+
+        double completionRate = totalExpected > 0 ? (double) totalLoaded / totalExpected * 100 : 0;
+
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html>\n")
+                .append("<html>\n")
+                .append("<head>\n")
+                .append("    <meta charset=\"UTF-8\">\n")
+                .append("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+                .append("    <!--[if gte mso 9]>\n")
+                .append("    <xml>\n")
+                .append("        <o:OfficeDocumentSettings>\n")
+                .append("            <o:AllowPNG/>\n")
+                .append("            <o:PixelsPerInch>96</o:PixelsPerInch>\n")
+                .append("        </o:OfficeDocumentSettings>\n")
+                .append("    </xml>\n")
+                .append("    <![endif]-->\n")
+                .append(getEmailOptimizedStyles())
+                .append("</head>\n")
+                .append("<body style=\"margin: 0; padding: 0; background-color: white !important; background: white !important; font-family: Arial, sans-serif;\" bgcolor=\"white\" class=\"darkmode-bg\">\n")
+
+                // Use table-based layout for email compatibility - make it wider
+                .append("    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background-color: white !important; background: white !important;\" bgcolor=\"white\">\n")
+                .append("        <tr>\n")
+                .append("            <td align=\"center\" style=\"padding: 20px; background-color: white !important;\" bgcolor=\"white\">\n")
+                .append("                <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"900\" class=\"main-table\" style=\"max-width: 95%; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);\" bgcolor=\"white\">\n")
+
+                // Header with gradient background (email-safe)
+                .append(buildEmailHeader(formattedDate))
+
+                // Overview stats
+                .append(buildEmailOverviewStats(totalLoaded, totalExpected, completionRate, completeSummaries, missingScenarios))
+
+                // Summary section (always visible)
+                .append(buildEmailSummarySection(summaryData))
+
+                // Chart section with inline image
+                .append(buildEmailChartSection())
+
+                // Details section (first 20 items to avoid email length issues)
+                .append(buildEmailDetailsSection(scenarioDetails.stream().limit(20).collect(Collectors.toList())))
+
+                // Backdated scenarios
+                .append(buildEmailBackdatedSection(backdatedScenarios))
+
+                // Footer
+                .append(buildEmailFooter(timestamp))
+
+                .append("                </table>\n")
+                .append("            </td>\n")
+                .append("        </tr>\n")
+                .append("    </table>\n")
+                .append("</body>\n")
+                .append("</html>");
+
+        return html.toString();
+    }
+
+    private String getEmailOptimizedStyles() {
+        return "    <style type=\"text/css\">\n" +
+                "        #outlook a { padding: 0; }\n" +
+                "        \n" +
+                "        /* Email client resets */\n" +
+                "        .ReadMsgBody { width: 100%; background-color: white !important; }\n" +
+                "        .ExternalClass { width: 100%; background-color: white !important; }\n" +
+                "        .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div { line-height: 100%; background-color: white !important; }\n" +
+                "        body, table, td, p, a, li, blockquote { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }\n" +
+                "        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }\n" +
+                "        img { -ms-interpolation-mode: bicubic; }\n" +
+                "        \n" +
+                "        /* Outlook specific */\n" +
+                "        .outlook-table { width: 100% !important; }\n" +
+                "        \n" +
+                "        /* Status colors - exempt from background override */\n" +
+                "        .status-success { color: #4caf50 !important; font-weight: bold; background-color: transparent !important; }\n" +
+                "        .status-warning { color: #ff9800 !important; font-weight: bold; background-color: transparent !important; }\n" +
+                "        .status-danger { color: #f44336 !important; font-weight: bold; background-color: transparent !important; }\n" +
+                "        .status-info { color: #00A693 !important; font-weight: bold; background-color: transparent !important; }\n" +
+                "        \n" +
+                "        /* Exempt header and stats from white background override */\n" +
+                "        .header-gradient { background: linear-gradient(135deg, #006A4E 0%, #00A693 100%) !important; }\n" +
+                "        .stats-bg { background-color: #e8f5f1 !important; }\n" +
+                "        .chart-bg { background-color: #fafafa !important; }\n" +
+                "        .footer-bg { background-color: #f5f5f5 !important; }\n" +
+                "        .info-box-bg { background-color: #e8f5f1 !important; }\n" +
+                "        .warning-box-bg { background-color: #fff3cd !important; }\n" +
+                "        \n" +
+                "        /* Mobile responsive */\n" +
+                "        @media only screen and (max-width: 600px) {\n" +
+                "            .container { width: 100% !important; }\n" +
+                "            .content { padding: 10px !important; }\n" +
+                "            .main-table { width: 100% !important; }\n" +
+                "        }\n" +
+                "        \n" +
+                "        /* Ensure tables expand properly */\n" +
+                "        .main-table { width: 900px; max-width: 95%; }\n" +
+                "        .content-table { width: 100%; }\n" +
+                "    </style>\n";
+    }
+
+    private String buildEmailHeader(String formattedDate) {
+        return "                    <!-- Header with enhanced gradient and better text visibility -->\n" +
+                "                    <tr>\n" +
+                "                        <td style=\"background: linear-gradient(135deg, #006A4E 0%, #00A693 100%); padding: 30px; text-align: center;\" class=\"header-gradient\">\n" +
+                "                                        <h1 style=\"background: transparent;margin: 0; font-size: 32px; font-weight: 400; color: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.4); letter-spacing: -0.5px;\">📊 Surveillance Data Load Report</h1>\n" +
+                "                                        <div style=\"background: transparent;font-size: 20px; color: #ffffff !important; margin-top: 12px; font-family: 'Segoe UI', Arial, sans-serif; font-weight: 300; text-shadow: 0 1px 2px rgba(0,0,0,0.3);\">" + formattedDate + "</div>\n" +
+                "                        </td>\n" +
+                "                    </tr>\n";
+    }
+
+    private String buildEmailOverviewStats(long totalLoaded, long totalExpected, double completionRate,
+                                           long completeSummaries, long missingScenarios) {
+        return "                    <!-- Overview Stats -->\n" +
+                "                    <tr>\n" +
+                "                        <td style=\"background-color: #e8f5f1 !important; padding: 20px;\" class=\"stats-bg\" bgcolor=\"#e8f5f1\">\n" +
+                "                            <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" class=\"content-table\">\n" +
+                "                                <tr>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", totalLoaded) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">SCENARIOS LOADED</div>\n" +
+                "                                    </td>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", totalExpected) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">EXPECTED SCENARIOS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%.1f%%", completionRate) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">COMPLETION RATE</div>\n" +
+                "                                    </td>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", completeSummaries) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">COMPLETE GROUPS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", missingScenarios) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">MISSING SCENARIOS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">📋</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">REPORT STATUS</div>\n" +
+                "                                    </td>\n" +
+                "                                </tr>\n" +
+                "                            </table>\n" +
+                "                        </td>\n" +
+                "                    </tr>\n";
+    }
+
+    private String buildEmailSummarySection(List<BatchSummary> summaryData) {
+        StringBuilder section = new StringBuilder();
+        section.append("                    <!-- Load Summary -->\n")
+                .append("                    <tr>\n")
+                .append("                        <td style=\"padding: 30px; border-bottom: 1px solid #e0e0e0;\">\n")
+                .append("                            <h2 style=\"color: #006A4E; margin: 0 0 20px 0; font-size: 20px; font-family: Arial, sans-serif;\">📋 Load Summary</h2>\n");
+
+        if (summaryData.isEmpty()) {
+            section.append("                            <div style=\"text-align: center; padding: 40px; color: #666; font-style: italic; font-family: Arial, sans-serif;\">No data loaded for this batch date</div>\n");
+        } else {
+            section.append("                            <table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" width=\"100%\" class=\"data-table\" style=\"border-collapse: collapse; border: 1px solid #ddd; font-family: Arial, sans-serif; background-color: white !important;\">\n")
+                    .append("                                <thead>\n")
+                    .append("                                    <tr>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: left; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Asset Class</th>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: left; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Product</th>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: left; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Entity</th>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: right; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Loaded</th>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: right; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Expected</th>\n")
+                    .append("                                        <th style=\"background-color: #006A4E !important; color: white !important; padding: 12px; text-align: right; font-size: 13px; font-weight: 600; border: 1px solid #004d37;\">Status</th>\n")
+                    .append("                                    </tr>\n")
+                    .append("                                </thead>\n")
+                    .append("                                <tbody>\n");
+
+            boolean isEven = false;
+            for (BatchSummary summary : summaryData) {
+                String statusIcon = getStatusIcon(summary.getStatus());
+                String statusClass = "status-" + summary.getStatus().getCssClass();
+                String rowBg = isEven ? "#f8f9fa" : "white";
+
+                section.append("                                    <tr>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; background-color: ").append(rowBg).append(" !important;\">").append(escapeHtml(summary.getAssetClass())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; background-color: ").append(rowBg).append(" !important;\">").append(escapeHtml(summary.getProduct())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; background-color: ").append(rowBg).append(" !important;\">").append(escapeHtml(summary.getEntity())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; text-align: right; font-weight: 600; color: #006A4E; background-color: ").append(rowBg).append(" !important; font-family: 'Segoe UI', Arial, monospace;\">").append(String.format("%,d", summary.getLoadCount())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; text-align: right; font-weight: 600; color: #006A4E; background-color: ").append(rowBg).append(" !important; font-family: 'Segoe UI', Arial, monospace;\">").append(String.format("%,d", summary.getExpectedCount())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 14px 12px; border: 1px solid #e0e0e0; font-size: 14px; text-align: right; background-color: ").append(rowBg).append(" !important; font-weight: 700;\" class=\"").append(statusClass).append("\">")
+                        .append(statusIcon).append(" ").append(summary.getStatus().getDisplayName()).append("</td>\n")
+                        .append("                                    </tr>\n");
+                isEven = !isEven;
+            }
+
+            section.append("                                </tbody>\n")
+                    .append("                            </table>\n");
+        }
+
+        section.append("                        </td>\n")
+                .append("                    </tr>\n");
+
+        return section.toString();
+    }
+
+    private String buildEmailChartSection() {
+        return "                    <!-- Chart Section -->\n" +
+                "                    <tr>\n" +
+                "                        <td style=\"padding: 30px; text-align: center; background-color: #fafafa !important; border-bottom: 1px solid #e0e0e0;\" class=\"chart-bg\" bgcolor=\"#fafafa\">\n" +
+                "                            <h2 style=\"color: #006A4E; margin: 0 0 20px 0; font-size: 20px; font-family: Arial, sans-serif;\">📈 120-Day Load Status Trend</h2>\n" +
+                "                            <img src=\"cid:statusChart\" alt=\"Batch Status Chart\" style=\"max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);\"/>\n" +
+                "                            <p style=\"font-size: 12px; color: #666; margin-top: 15px; font-family: Arial, sans-serif;\">\n" +
+                "                                Green: Successfully loaded batches | Red: Missing/failed batches\n" +
+                "                            </p>\n" +
+                "                        </td>\n" +
+                "                    </tr>\n";
+    }
+
+    private String buildEmailDetailsSection(List<ScenarioDetail> scenarioDetails) {
+        StringBuilder section = new StringBuilder();
+        section.append("                    <!-- Scenario Details (Top 20) -->\n")
+                .append("                    <tr>\n")
+                .append("                        <td style=\"padding: 30px; border-bottom: 1px solid #e0e0e0;\">\n")
+                .append("                            <h2 style=\"color: #006A4E; margin: 0 0 20px 0; font-size: 20px; font-family: Arial, sans-serif;\">📄 Key Scenario Details</h2>\n");
+
+        if (scenarioDetails.isEmpty()) {
+            section.append("                            <div style=\"text-align: center; padding: 40px; color: #666; font-style: italic; font-family: Arial, sans-serif;\">No scenario details available</div>\n");
+        } else {
+            // Show only missing and unexpected scenarios for relevance
+            List<ScenarioDetail> relevantDetails = scenarioDetails.stream()
+//                    .filter(detail -> detail.getStatus() == ScenarioDetail.ScenarioStatus.MISSING ||
+//                            detail.getStatus() == ScenarioDetail.ScenarioStatus.UNEXPECTED)
+                    .collect(Collectors.toList());
+
+            if (relevantDetails.isEmpty()) {
+                section.append("                            <div style=\"text-align: center; padding: 20px; color: #4caf50; font-weight: bold; font-family: Arial, sans-serif;\">✅ All expected scenarios loaded successfully!</div>\n");
+            } else {
+                section.append("                            <div style=\"background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px; font-family: Arial, sans-serif;\">\n")
+                        .append("                                <strong>Attention Required:</strong> Please note, some scenarios are missing:\n")
+                        .append("                            </div>\n")
+                        .append("                            <table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" width=\"100%\" style=\"border-collapse: collapse; border: 1px solid #ddd; font-family: Arial, sans-serif;\">\n")
+                        .append("                                <thead>\n")
+                        .append("                                    <tr style=\"background-color: #006A4E; color: white;\">\n")
+                        .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Asset Class</th>\n")
+                        .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Product</th>\n")
+                        .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Entity</th>\n")
+                        .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Scenario</th>\n")
+                        .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Status</th>\n")
+                        .append("                                    </tr>\n")
+                        .append("                                </thead>\n")
+                        .append("                                <tbody>\n");
+
+                boolean isEven = false;
+                for (ScenarioDetail detail : relevantDetails) {
+                    String statusIcon = getScenarioStatusIcon(detail.getStatus());
+                    String statusClass = "status-" + detail.getStatus().getCssClass();
+                    String rowBg = isEven ? "#f8f9fa" : "white";
+
+                    section.append("                                    <tr style=\"background-color: ").append(rowBg).append(";\">\n")
+                            .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(detail.getAssetClass())).append("</td>\n")
+                            .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(detail.getProduct())).append("</td>\n")
+                            .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(detail.getEntity())).append("</td>\n")
+                            .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(detail.getScenario())).append("</td>\n")
+                            .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\" class=\"").append(statusClass).append("\">")
+                            .append(statusIcon).append(" ").append(detail.getStatus().getDisplayName()).append("</td>\n")
+                            .append("                                    </tr>\n");
+                    isEven = !isEven;
+                }
+
+                section.append("                                </tbody>\n")
+                        .append("                            </table>\n");
+            }
+        }
+
+        section.append("                        </td>\n")
+                .append("                    </tr>\n");
+
+        return section.toString();
+    }
+
+    private String buildEmailBackdatedSection(List<BackdatedScenario> backdatedScenarios) {
+        StringBuilder section = new StringBuilder();
+        section.append("                    <!-- Backdated Scenarios -->\n")
+                .append("                    <tr>\n")
+                .append("                        <td style=\"padding: 30px; border-bottom: 1px solid #e0e0e0;\">\n")
+                .append("                            <h2 style=\"color: #006A4E; margin: 0 0 20px 0; font-size: 20px; font-family: Arial, sans-serif;\">🔄 Recently Loaded Backdated Scenarios</h2>\n");
+
+        if (backdatedScenarios.isEmpty()) {
+            section.append("                            <div style=\"text-align: center; padding: 20px; color: #666; font-style: italic; font-family: Arial, sans-serif;\">No backdated scenarios loaded in the last 7 days</div>\n");
+        } else {
+            section.append("                            <div style=\"background-color: #e8f5f1; border-left: 4px solid #00A693; padding: 15px; margin-bottom: 20px; font-family: Arial, sans-serif;\">\n")
+                    .append("                                <strong>Note:</strong> These scenarios have batch dates older than today but were loaded recently. ")
+                    .append("This typically indicates catch-up processing or delayed data delivery.\n")
+                    .append("                            </div>\n")
+                    .append("                            <table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" width=\"100%\" style=\"border-collapse: collapse; border: 1px solid #ddd; font-family: Arial, sans-serif;\">\n")
+                    .append("                                <thead>\n")
+                    .append("                                    <tr style=\"background-color: #006A4E; color: white;\">\n")
+                    .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Asset Class</th>\n")
+                    .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Product</th>\n")
+                    .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Scenario</th>\n")
+                    .append("                                        <th style=\"padding: 12px; text-align: left; font-size: 12px;\">Batch Date</th>\n")
+                    .append("                                        <th style=\"padding: 12px; text-align: right; font-size: 12px;\">Days Late</th>\n")
+                    .append("                                    </tr>\n")
+                    .append("                                </thead>\n")
+                    .append("                                <tbody>\n");
+
+            boolean isEven = false;
+            for (BackdatedScenario backdated : backdatedScenarios) {
+                long daysLate = java.time.temporal.ChronoUnit.DAYS.between(backdated.getBatchDate(), backdated.getLoadedDate());
+                String lateness = daysLate > 7 ? "status-danger" : (daysLate > 3 ? "status-warning" : "status-info");
+                String rowBg = isEven ? "#f8f9fa" : "white";
+
+                section.append("                                    <tr style=\"background-color: ").append(rowBg).append(";\">\n")
+                        .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(backdated.getAssetClass())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(backdated.getProduct())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(escapeHtml(backdated.getScenario())).append("</td>\n")
+                        .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px;\">").append(backdated.getBatchDate().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))).append("</td>\n")
+                        .append("                                        <td style=\"padding: 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px; text-align: right; font-weight: 600;\" class=\"").append(lateness).append("\">").append(daysLate).append("</td>\n")
+                        .append("                                    </tr>\n");
+                isEven = !isEven;
+            }
+
+            section.append("                                </tbody>\n")
+                    .append("                            </table>\n");
+        }
+
+        section.append("                        </td>\n")
+                .append("                    </tr>\n");
+
+        return section.toString();
+    }
+
+    private String buildEmailFooter(String timestamp) {
+        return "                    <!-- Footer -->\n" +
+                "                    <tr>\n" +
+                "                        <td style=\"background-color: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666; border-top: 1px solid #e0e0e0; font-family: Arial, sans-serif;\">\n" +
+                "                            <p style=\"margin: 0 0 10px 0;\">Report generated on " + timestamp + " | Trade Surveillance</p>\n" +
+                "                            <p style=\"margin: 0;\">For questions or issues, please contact the Trade Surveillance dev team via the Teams channel.</p>\n" +
+                "                        </td>\n" +
+                "                    </tr>\n";
     }
 
     /**
