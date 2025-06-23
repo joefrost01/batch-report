@@ -1,9 +1,8 @@
 package com.demo.batchreport.service;
 
 import com.demo.batchreport.config.Config;
-import com.demo.batchreport.domain.BatchRecord;
-import com.demo.batchreport.domain.BatchStatusCount;
-import com.demo.batchreport.domain.BatchSummary;
+import com.demo.batchreport.config.ExpectedScenariosConfig;
+import com.demo.batchreport.domain.*;
 import com.demo.batchreport.repository.BatchQueryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,10 +26,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.demo.batchreport.config.StyleConfig.getStyles;
 
 @Slf4j
 @Service
@@ -44,11 +44,12 @@ public class BatchReportService {
     public void sendBatchReport(LocalDate batchDate) {
         try {
             List<BatchRecord> batchRecords = batchQueryRepository.findAllByBatchDate(batchDate);
-            List<BatchSummary> summaryData = generateSummaryData(batchRecords);
+            List<BatchSummary> summaryData = generateSummaryDataWithExpectations(batchRecords);
+            List<ScenarioDetail> scenarioDetails = generateScenarioDetails(batchRecords);
             List<BatchStatusCount> statusCounts = findStatusCountsForLast120Days(batchDate);
 
             File chartFile = generateStatusChart(statusCounts);
-            String htmlContent = buildBatchReportEmail(batchDate, summaryData, batchRecords, statusCounts);
+            String htmlContent = buildBatchReportEmail(batchDate, summaryData, scenarioDetails, statusCounts);
 
             sendEmail(buildSubject(batchDate), htmlContent, chartFile);
 
@@ -88,12 +89,14 @@ public class BatchReportService {
     }
 
     public String generateBatchReportHtml(LocalDate batchDate, List<BatchRecord> batchRecords, List<BatchStatusCount> statusCounts) {
-        List<BatchSummary> summaryData = generateSummaryData(batchRecords);
-        return buildBatchReportEmail(batchDate, summaryData, batchRecords, statusCounts);
+        List<BatchSummary> summaryData = generateSummaryDataWithExpectations(batchRecords);
+        List<ScenarioDetail> scenarioDetails = generateScenarioDetails(batchRecords);
+        return buildBatchReportEmail(batchDate, summaryData, scenarioDetails, statusCounts);
     }
 
-    private List<BatchSummary> generateSummaryData(List<BatchRecord> batchRecords) {
-        Map<String, Long> summaryMap = batchRecords.stream()
+    private List<BatchSummary> generateSummaryDataWithExpectations(List<BatchRecord> batchRecords) {
+        // Group loaded records by asset class, product, and entity
+        Map<String, Long> loadedCounts = batchRecords.stream()
                 .collect(Collectors.groupingBy(
                         record -> String.format("%s|%s|%s",
                                 record.getAssetClass(),
@@ -102,11 +105,47 @@ public class BatchReportService {
                         Collectors.counting()
                 ));
 
-        return summaryMap.entrySet().stream()
-                .map(entry -> {
-                    String[] parts = entry.getKey().split("\\|");
-                    return new BatchSummary(parts[0], parts[1], parts[2], entry.getValue());
-                })
+        // Generate summary for all expected combinations
+        List<BatchSummary> summaries = new ArrayList<>();
+
+        Map<String, List<ExpectedScenariosConfig.ExpectedScenario>> scenariosByGroup =
+                ExpectedScenariosConfig.getScenariosByGroup();
+
+        for (Map.Entry<String, List<ExpectedScenariosConfig.ExpectedScenario>> entry : scenariosByGroup.entrySet()) {
+            String groupKey = entry.getKey();
+            String[] parts = groupKey.split("\\|");
+            String assetClass = parts[0];
+            String product = parts[1];
+            String entity = parts[2];
+
+            long expectedCount = entry.getValue().size();
+            long loadedCount = loadedCounts.getOrDefault(groupKey, 0L);
+
+            BatchSummary.CompletionStatus status = BatchSummary.CompletionStatus.fromCounts(
+                    loadedCount, expectedCount);
+
+            summaries.add(new BatchSummary(assetClass, product, entity,
+                    loadedCount, expectedCount, status));
+        }
+
+        // Add any unexpected combinations that were loaded but not in expected config
+        for (Map.Entry<String, Long> entry : loadedCounts.entrySet()) {
+            String groupKey = entry.getKey();
+            String[] parts = groupKey.split("\\|");
+            String assetClass = parts[0];
+            String product = parts[1];
+            String entity = parts[2];
+
+            // Check if this combination is expected
+            boolean isExpected = scenariosByGroup.containsKey(groupKey);
+
+            if (!isExpected) {
+                summaries.add(new BatchSummary(assetClass, product, entity,
+                        entry.getValue(), 0L, BatchSummary.CompletionStatus.UNKNOWN));
+            }
+        }
+
+        return summaries.stream()
                 .sorted((a, b) -> {
                     int assetClassCompare = a.getAssetClass().compareTo(b.getAssetClass());
                     if (assetClassCompare != 0) return assetClassCompare;
@@ -115,6 +154,70 @@ public class BatchReportService {
                     if (productCompare != 0) return productCompare;
 
                     return a.getEntity().compareTo(b.getEntity());
+                })
+                .collect(Collectors.toList());
+    }
+
+    private List<ScenarioDetail> generateScenarioDetails(List<BatchRecord> batchRecords) {
+        // Create a set of loaded scenarios
+        Set<String> loadedScenarios = batchRecords.stream()
+                .map(record -> String.format("%s|%s|%s|%s",
+                        record.getAssetClass(),
+                        record.getProduct(),
+                        record.getEntity(),
+                        record.getScenario()))
+                .collect(Collectors.toSet());
+
+        List<ScenarioDetail> details = new ArrayList<>();
+
+        // Add all expected scenarios
+        for (ExpectedScenariosConfig.ExpectedScenario expected : ExpectedScenariosConfig.getAllExpectedScenarios()) {
+            String fullKey = expected.getFullKey();
+            boolean isLoaded = loadedScenarios.contains(fullKey);
+
+            details.add(new ScenarioDetail(
+                    expected.getAssetClass(),
+                    expected.getProduct(),
+                    expected.getScenario(),
+                    expected.getEntity(),
+                    isLoaded,
+                    true // isExpected = true for all from config
+            ));
+        }
+
+        // Add any unexpected scenarios that were loaded
+        for (BatchRecord record : batchRecords) {
+            boolean isExpected = ExpectedScenariosConfig.isScenarioExpected(
+                    record.getAssetClass(),
+                    record.getProduct(),
+                    record.getEntity(),
+                    record.getScenario()
+            );
+
+            if (!isExpected) {
+                details.add(new ScenarioDetail(
+                        record.getAssetClass(),
+                        record.getProduct(),
+                        record.getScenario(),
+                        record.getEntity(),
+                        true, // isLoaded = true
+                        false // isExpected = false
+                ));
+            }
+        }
+
+        return details.stream()
+                .sorted((a, b) -> {
+                    int assetClassCompare = a.getAssetClass().compareTo(b.getAssetClass());
+                    if (assetClassCompare != 0) return assetClassCompare;
+
+                    int productCompare = a.getProduct().compareTo(b.getProduct());
+                    if (productCompare != 0) return productCompare;
+
+                    int entityCompare = a.getEntity().compareTo(b.getEntity());
+                    if (entityCompare != 0) return entityCompare;
+
+                    return a.getScenario().compareTo(b.getScenario());
                 })
                 .collect(Collectors.toList());
     }
@@ -162,14 +265,21 @@ public class BatchReportService {
     }
 
     private String buildBatchReportEmail(LocalDate batchDate, List<BatchSummary> summaryData,
-                                         List<BatchRecord> batchRecords, List<BatchStatusCount> statusCounts) {
+                                         List<ScenarioDetail> scenarioDetails, List<BatchStatusCount> statusCounts) {
 
         String formattedDate = batchDate.format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));
         String timestamp = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));
 
+        // Calculate statistics
         long totalLoaded = summaryData.stream().mapToLong(BatchSummary::getLoadCount).sum();
+        long totalExpected = summaryData.stream().mapToLong(BatchSummary::getExpectedCount).sum();
+        long completeSummaries = summaryData.stream().mapToLong(s -> s.isComplete() ? 1 : 0).sum();
+        long loadedScenarios = scenarioDetails.stream().mapToLong(s -> s.isLoaded() ? 1 : 0).sum();
+        long missingScenarios = scenarioDetails.stream().mapToLong(s -> s.getStatus() == ScenarioDetail.ScenarioStatus.MISSING ? 1 : 0).sum();
+
         int uniqueAssetClasses = (int) summaryData.stream().map(BatchSummary::getAssetClass).distinct().count();
         int uniqueProducts = (int) summaryData.stream().map(BatchSummary::getProduct).distinct().count();
+        int uniqueEntities = (int) summaryData.stream().map(BatchSummary::getEntity).distinct().count();
 
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html>\n")
@@ -177,151 +287,7 @@ public class BatchReportService {
                 .append("<head>\n")
                 .append("    <meta charset=\"UTF-8\">\n")
                 .append("    <style>\n")
-                .append("        body {\n")
-                .append("            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n")
-                .append("            line-height: 1.6;\n")
-                .append("            color: #333;\n")
-                .append("            max-width: 1200px;\n")
-                .append("            margin: 0 auto;\n")
-                .append("            padding: 20px;\n")
-                .append("            background-color: #f8f9fa;\n")
-                .append("        }\n")
-                .append("        .container {\n")
-                .append("            background-color: white;\n")
-                .append("            border-radius: 8px;\n")
-                .append("            box-shadow: 0 2px 4px rgba(0,0,0,0.1);\n")
-                .append("            overflow: hidden;\n")
-                .append("        }\n")
-                .append("        .header {\n")
-                .append("            background: linear-gradient(135deg, #1976d2 0%, #42a5f5 100%);\n")
-                .append("            color: white;\n")
-                .append("            padding: 30px;\n")
-                .append("            text-align: center;\n")
-                .append("        }\n")
-                .append("        .header h1 {\n")
-                .append("            margin: 0;\n")
-                .append("            font-size: 28px;\n")
-                .append("            font-weight: 300;\n")
-                .append("        }\n")
-                .append("        .header .batch-date {\n")
-                .append("            font-size: 18px;\n")
-                .append("            opacity: 0.9;\n")
-                .append("            margin-top: 10px;\n")
-                .append("        }\n")
-                .append("        .stats-overview {\n")
-                .append("            display: flex;\n")
-                .append("            justify-content: space-around;\n")
-                .append("            padding: 20px;\n")
-                .append("            background-color: #e3f2fd;\n")
-                .append("            border-bottom: 1px solid #bbdefb;\n")
-                .append("        }\n")
-                .append("        .stat-item {\n")
-                .append("            text-align: center;\n")
-                .append("            padding: 10px;\n")
-                .append("        }\n")
-                .append("        .stat-number {\n")
-                .append("            font-size: 24px;\n")
-                .append("            font-weight: bold;\n")
-                .append("            color: #1976d2;\n")
-                .append("            display: block;\n")
-                .append("        }\n")
-                .append("        .stat-label {\n")
-                .append("            font-size: 12px;\n")
-                .append("            color: #666;\n")
-                .append("            text-transform: uppercase;\n")
-                .append("            letter-spacing: 0.5px;\n")
-                .append("        }\n")
-                .append("        .section {\n")
-                .append("            padding: 30px;\n")
-                .append("            border-bottom: 1px solid #e0e0e0;\n")
-                .append("        }\n")
-                .append("        .section h2 {\n")
-                .append("            color: #1976d2;\n")
-                .append("            margin-top: 0;\n")
-                .append("            margin-bottom: 20px;\n")
-                .append("            font-size: 20px;\n")
-                .append("            border-bottom: 2px solid #1976d2;\n")
-                .append("            padding-bottom: 10px;\n")
-                .append("        }\n")
-                .append("        .table-container {\n")
-                .append("            overflow-x: auto;\n")
-                .append("            margin: 20px 0;\n")
-                .append("        }\n")
-                .append("        table {\n")
-                .append("            width: 100%;\n")
-                .append("            border-collapse: collapse;\n")
-                .append("            background-color: white;\n")
-                .append("            box-shadow: 0 1px 3px rgba(0,0,0,0.12);\n")
-                .append("            border-radius: 6px;\n")
-                .append("            overflow: hidden;\n")
-                .append("        }\n")
-                .append("        th {\n")
-                .append("            background-color: #1976d2;\n")
-                .append("            color: white;\n")
-                .append("            padding: 15px 12px;\n")
-                .append("            text-align: left;\n")
-                .append("            font-weight: 600;\n")
-                .append("            font-size: 14px;\n")
-                .append("            text-transform: uppercase;\n")
-                .append("            letter-spacing: 0.5px;\n")
-                .append("        }\n")
-                .append("        td {\n")
-                .append("            padding: 12px;\n")
-                .append("            border-bottom: 1px solid #e0e0e0;\n")
-                .append("            font-size: 14px;\n")
-                .append("        }\n")
-                .append("        tr:nth-child(even) {\n")
-                .append("            background-color: #f8f9fa;\n")
-                .append("        }\n")
-                .append("        tr:hover {\n")
-                .append("            background-color: #e3f2fd;\n")
-                .append("        }\n")
-                .append("        .number-cell {\n")
-                .append("            text-align: right;\n")
-                .append("            font-weight: 600;\n")
-                .append("            color: #1976d2;\n")
-                .append("        }\n")
-                .append("        .chart-section {\n")
-                .append("            text-align: center;\n")
-                .append("            padding: 30px;\n")
-                .append("            background-color: #fafafa;\n")
-                .append("        }\n")
-                .append("        .chart-section h2 {\n")
-                .append("            color: #333;\n")
-                .append("            margin-bottom: 20px;\n")
-                .append("        }\n")
-                .append("        .chart-section img {\n")
-                .append("            max-width: 100%;\n")
-                .append("            height: auto;\n")
-                .append("            border-radius: 6px;\n")
-                .append("            box-shadow: 0 2px 8px rgba(0,0,0,0.15);\n")
-                .append("        }\n")
-                .append("        .empty-state {\n")
-                .append("            text-align: center;\n")
-                .append("            padding: 40px;\n")
-                .append("            color: #666;\n")
-                .append("            font-style: italic;\n")
-                .append("        }\n")
-                .append("        .footer {\n")
-                .append("            background-color: #f5f5f5;\n")
-                .append("            padding: 20px 30px;\n")
-                .append("            text-align: center;\n")
-                .append("            font-size: 12px;\n")
-                .append("            color: #666;\n")
-                .append("            border-top: 1px solid #e0e0e0;\n")
-                .append("        }\n")
-                .append("        @media (max-width: 768px) {\n")
-                .append("            .stats-overview {\n")
-                .append("                flex-direction: column;\n")
-                .append("            }\n")
-                .append("            .stat-item {\n")
-                .append("                margin: 5px 0;\n")
-                .append("            }\n")
-                .append("            th, td {\n")
-                .append("                padding: 8px 6px;\n")
-                .append("                font-size: 12px;\n")
-                .append("            }\n")
-                .append("        }\n")
+                .append(getStyles())
                 .append("    </style>\n")
                 .append("</head>\n")
                 .append("<body>\n")
@@ -331,11 +297,13 @@ public class BatchReportService {
                 .append("            <div class=\"batch-date\">").append(formattedDate).append("</div>\n")
                 .append("        </div>\n")
                 .append("        \n")
+                .append(buildOverviewStatsSection(totalLoaded, totalExpected, completeSummaries, loadedScenarios, missingScenarios, uniqueAssetClasses, uniqueProducts, uniqueEntities))
+                .append("        \n")
                 .append(buildSummarySection(summaryData))
                 .append("        \n")
                 .append(buildChartSection())
                 .append("        \n")
-                .append(buildDetailSection(batchRecords))
+                .append(buildDetailSection(scenarioDetails))
                 .append("        \n")
                 .append("        <div class=\"footer\">\n")
                 .append("            <p>Report generated on ").append(timestamp).append(" | Trade Surveillance</p>\n")
@@ -346,6 +314,39 @@ public class BatchReportService {
                 .append("</html>");
 
         return html.toString();
+    }
+
+    private String buildOverviewStatsSection(long totalLoaded, long totalExpected, long completeSummaries,
+                                             long loadedScenarios, long missingScenarios,
+                                             int uniqueAssetClasses, int uniqueProducts, int uniqueEntities) {
+        double completionRate = totalExpected > 0 ? (double) totalLoaded / totalExpected * 100 : 0;
+
+        return "<div class=\"stats-overview\">\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + String.format("%,d", totalLoaded) + "</span>\n" +
+                "        <span class=\"stat-label\">Scenarios Loaded</span>\n" +
+                "    </div>\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + String.format("%,d", totalExpected) + "</span>\n" +
+                "        <span class=\"stat-label\">Expected Scenarios</span>\n" +
+                "    </div>\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + String.format("%.1f%%", completionRate) + "</span>\n" +
+                "        <span class=\"stat-label\">Completion Rate</span>\n" +
+                "    </div>\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + String.format("%,d", completeSummaries) + "</span>\n" +
+                "        <span class=\"stat-label\">Complete Groups</span>\n" +
+                "    </div>\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + String.format("%,d", missingScenarios) + "</span>\n" +
+                "        <span class=\"stat-label\">Missing Scenarios</span>\n" +
+                "    </div>\n" +
+                "    <div class=\"stat-item\">\n" +
+                "        <span class=\"stat-number\">" + uniqueAssetClasses + "</span>\n" +
+                "        <span class=\"stat-label\">Asset Classes</span>\n" +
+                "    </div>\n" +
+                "</div>\n";
     }
 
     private String buildSummarySection(List<BatchSummary> summaryData) {
@@ -366,17 +367,27 @@ public class BatchReportService {
                 .append("                    <th>Asset Class</th>\n")
                 .append("                    <th>Product</th>\n")
                 .append("                    <th>Entity</th>\n")
-                .append("                    <th>Load Count</th>\n")
+                .append("                    <th>Loaded</th>\n")
+                .append("                    <th>Expected</th>\n")
+                .append("                    <th>Completion</th>\n")
+                .append("                    <th>Status</th>\n")
                 .append("                </tr>\n")
                 .append("            </thead>\n")
                 .append("            <tbody>\n");
 
         for (BatchSummary summary : summaryData) {
+            String statusIcon = getStatusIcon(summary.getStatus());
+            String statusClass = "status-" + summary.getStatus().getCssClass();
+
             section.append("                <tr>\n")
                     .append("                    <td>").append(escapeHtml(summary.getAssetClass())).append("</td>\n")
                     .append("                    <td>").append(escapeHtml(summary.getProduct())).append("</td>\n")
                     .append("                    <td>").append(escapeHtml(summary.getEntity())).append("</td>\n")
                     .append("                    <td class=\"number-cell\">").append(String.format("%,d", summary.getLoadCount())).append("</td>\n")
+                    .append("                    <td class=\"number-cell\">").append(String.format("%,d", summary.getExpectedCount())).append("</td>\n")
+                    .append("                    <td class=\"number-cell\">").append(summary.getCompletionPercentage()).append("</td>\n")
+                    .append("                    <td class=\"").append(statusClass).append("\">")
+                    .append(statusIcon).append(" ").append(summary.getStatus().getDisplayName()).append("</td>\n")
                     .append("                </tr>\n");
         }
 
@@ -388,37 +399,41 @@ public class BatchReportService {
         return section.toString();
     }
 
-    private String buildDetailSection(List<BatchRecord> batchRecords) {
-        if (batchRecords.isEmpty()) {
+    private String buildDetailSection(List<ScenarioDetail> scenarioDetails) {
+        if (scenarioDetails.isEmpty()) {
             return "<div class=\"section\">\n" +
-                    "    <h2>📄 Detailed Records</h2>\n" +
-                    "    <div class=\"empty-state\">No detailed records available</div>\n" +
+                    "    <h2>📄 Scenario Details</h2>\n" +
+                    "    <div class=\"empty-state\">No scenario details available</div>\n" +
                     "</div>\n";
         }
 
         StringBuilder section = new StringBuilder();
         section.append("<div class=\"section\">\n")
-                .append("    <h2>📄 Detailed Records</h2>\n")
+                .append("    <h2>📄 Scenario Details</h2>\n")
                 .append("    <div class=\"table-container\">\n")
                 .append("        <table>\n")
                 .append("            <thead>\n")
                 .append("                <tr>\n")
                 .append("                    <th>Asset Class</th>\n")
                 .append("                    <th>Product</th>\n")
-                .append("                    <th>Scenario</th>\n")
                 .append("                    <th>Entity</th>\n")
-                .append("                    <th>Batch Date</th>\n")
+                .append("                    <th>Scenario</th>\n")
+                .append("                    <th>Status</th>\n")
                 .append("                </tr>\n")
                 .append("            </thead>\n")
                 .append("            <tbody>\n");
 
-        for (BatchRecord record : batchRecords) {
+        for (ScenarioDetail detail : scenarioDetails) {
+            String statusIcon = getScenarioStatusIcon(detail.getStatus());
+            String statusClass = "status-" + detail.getStatus().getCssClass();
+
             section.append("                <tr>\n")
-                    .append("                    <td>").append(escapeHtml(record.getAssetClass())).append("</td>\n")
-                    .append("                    <td>").append(escapeHtml(record.getProduct())).append("</td>\n")
-                    .append("                    <td>").append(escapeHtml(record.getScenario())).append("</td>\n")
-                    .append("                    <td>").append(escapeHtml(record.getEntity())).append("</td>\n")
-                    .append("                    <td>").append(record.getBatchDate().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))).append("</td>\n")
+                    .append("                    <td>").append(escapeHtml(detail.getAssetClass())).append("</td>\n")
+                    .append("                    <td>").append(escapeHtml(detail.getProduct())).append("</td>\n")
+                    .append("                    <td>").append(escapeHtml(detail.getEntity())).append("</td>\n")
+                    .append("                    <td>").append(escapeHtml(detail.getScenario())).append("</td>\n")
+                    .append("                    <td class=\"").append(statusClass).append("\">")
+                    .append(statusIcon).append(" ").append(detail.getStatus().getDisplayName()).append("</td>\n")
                     .append("                </tr>\n");
         }
 
@@ -438,6 +453,32 @@ public class BatchReportService {
                 "        Green: Successfully loaded batches | Red: Missing/failed batches\n" +
                 "    </p>\n" +
                 "</div>\n";
+    }
+
+    private String getStatusIcon(BatchSummary.CompletionStatus status) {
+        switch (status) {
+            case COMPLETE:
+                return "✅";
+            case INCOMPLETE:
+                return "❌";
+            case EXCESS:
+                return "⚠️";
+            default:
+                return "❓";
+        }
+    }
+
+    private String getScenarioStatusIcon(ScenarioDetail.ScenarioStatus status) {
+        switch (status) {
+            case LOADED:
+                return "✅";
+            case MISSING:
+                return "❌";
+            case UNEXPECTED:
+                return "⚠️";
+            default:
+                return "➖";
+        }
     }
 
     private String escapeHtml(String text) {
@@ -471,4 +512,3 @@ public class BatchReportService {
         mailSender.send(message);
     }
 }
-
