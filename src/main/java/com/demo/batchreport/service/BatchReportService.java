@@ -125,13 +125,18 @@ public class BatchReportService {
                 .append("    <![endif]-->\n")
                 .append(getEmailOptimizedStyles())
                 .append("</head>\n")
-                .append("<body style=\"margin: 0; padding: 0; background-color: white !important; background: white !important; font-family: Arial, sans-serif;\" bgcolor=\"white\" class=\"darkmode-bg\">\n")
+                .append("<body style=\"margin: 0; padding: 0; background-color: white; font-family: Arial, Helvetica, sans-serif;\" bgcolor=\"white\">\n")
 
-                // Use table-based layout for email compatibility - make it wider
-                .append("    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background-color: white !important; background: white !important;\" bgcolor=\"white\">\n")
+                // Use table-based layout optimized for Outlook
+                .append("    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background-color: white; margin: 0; padding: 0;\" bgcolor=\"white\">\n")
                 .append("        <tr>\n")
-                .append("            <td align=\"center\" style=\"padding: 20px; background-color: white !important;\" bgcolor=\"white\">\n")
-                .append("                <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"900\" class=\"main-table\" style=\"max-width: 95%; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);\" bgcolor=\"white\">\n")
+                .append("            <td align=\"center\" style=\"padding: 20px; background-color: white;\" bgcolor=\"white\">\n")
+                .append("                <!--[if (gte mso 9)|(IE)]>\n")
+                .append("                <table width=\"900\" align=\"center\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n")
+                .append("                <tr>\n")
+                .append("                <td>\n")
+                .append("                <![endif]-->\n")
+                .append("                <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" class=\"main-table\" style=\"max-width: 900px; background-color: white; border-radius: 8px; overflow: hidden;\" bgcolor=\"white\">\n")
 
                 // Header with gradient background (email-safe)
                 .append(buildEmailHeader(formattedDate))
@@ -155,63 +160,88 @@ public class BatchReportService {
                 .append(buildEmailFooter(timestamp))
 
                 .append("                </table>\n")
+                .append("                <!--[if (gte mso 9)|(IE)]>\n")
+                .append("                </td>\n")
+                .append("                </tr>\n")
+                .append("                </table>\n")
+                .append("                <![endif]-->\n")
                 .append("            </td>\n")
                 .append("        </tr>\n")
-                .append("    </table>\n")
-                .append("</body>\n")
-                .append("</html>");
+                .append("    </table>\n");
 
         return html.toString();
     }
 
     private String getEmailOptimizedStyles() {
         return "    <style type=\"text/css\">\n" +
+                "        /* Outlook and email client resets */\n" +
                 "        #outlook a { padding: 0; }\n" +
-                "        \n" +
-                "        /* Email client resets */\n" +
-                "        .ReadMsgBody { width: 100%; background-color: white !important; }\n" +
-                "        .ExternalClass { width: 100%; background-color: white !important; }\n" +
-                "        .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div { line-height: 100%; background-color: white !important; }\n" +
+                "        .ReadMsgBody { width: 100%; }\n" +
+                "        .ExternalClass { width: 100%; }\n" +
+                "        .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div { line-height: 100%; }\n" +
                 "        body, table, td, p, a, li, blockquote { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }\n" +
                 "        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }\n" +
-                "        img { -ms-interpolation-mode: bicubic; }\n" +
+                "        img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }\n" +
                 "        \n" +
-                "        /* Outlook specific */\n" +
-                "        .outlook-table { width: 100% !important; }\n" +
+                "        /* Main container */\n" +
+                "        .main-table { width: 900px; max-width: 95%; }\n" +
+                "        .content-table { width: 100%; }\n" +
                 "        \n" +
-                "        /* Status colors - exempt from background override */\n" +
-                "        .status-success { color: #4caf50 !important; font-weight: bold; background-color: transparent !important; }\n" +
-                "        .status-warning { color: #ff9800 !important; font-weight: bold; background-color: transparent !important; }\n" +
-                "        .status-danger { color: #f44336 !important; font-weight: bold; background-color: transparent !important; }\n" +
-                "        .status-info { color: #00A693 !important; font-weight: bold; background-color: transparent !important; }\n" +
+                "        /* Status colors */\n" +
+                "        .status-success { color: #22c55e !important; font-weight: bold; }\n" +
+                "        .status-warning { color: #f59e0b !important; font-weight: bold; }\n" +
+                "        .status-danger { color: #ef4444 !important; font-weight: bold; }\n" +
+                "        .status-info { color: #00A693 !important; font-weight: bold; }\n" +
+                "        .status-incomplete { color: #ef4444 !important; font-weight: bold; }\n" +
+                "        .status-complete { color: #22c55e !important; font-weight: bold; }\n" +
                 "        \n" +
-                "        /* Exempt header and stats from white background override */\n" +
-                "        .header-gradient { background: linear-gradient(135deg, #006A4E 0%, #00A693 100%) !important; }\n" +
-                "        .stats-bg { background-color: #e8f5f1 !important; }\n" +
-                "        .chart-bg { background-color: #fafafa !important; }\n" +
-                "        .footer-bg { background-color: #f5f5f5 !important; }\n" +
-                "        .info-box-bg { background-color: #e8f5f1 !important; }\n" +
-                "        .warning-box-bg { background-color: #fff3cd !important; }\n" +
+                "        /* Table styling */\n" +
+                "        .data-table { border-collapse: collapse !important; width: 100% !important; }\n" +
+                "        .data-table th { background-color: #006A4E !important; color: white !important; padding: 14px 12px !important; text-align: left !important; font-size: 13px !important; font-weight: 600 !important; border: 1px solid #004d37 !important; }\n" +
+                "        .data-table td { padding: 14px 12px !important; border: 1px solid #e0e0e0 !important; font-size: 14px !important; }\n" +
                 "        \n" +
                 "        /* Mobile responsive */\n" +
                 "        @media only screen and (max-width: 600px) {\n" +
-                "            .container { width: 100% !important; }\n" +
-                "            .content { padding: 10px !important; }\n" +
                 "            .main-table { width: 100% !important; }\n" +
+                "            .content-table { width: 100% !important; }\n" +
                 "        }\n" +
                 "        \n" +
-                "        /* Ensure tables expand properly */\n" +
-                "        .main-table { width: 900px; max-width: 95%; }\n" +
-                "        .content-table { width: 100%; }\n" +
-                "    </style>\n";
+                "        /* Outlook specific VML namespace */\n" +
+                "        v\\:* { behavior: url(#default#VML); display: inline-block; }\n" +
+                "    </style>\n" +
+                "    <!--[if gte mso 9]>\n" +
+                "    <xml>\n" +
+                "        <o:OfficeDocumentSettings>\n" +
+                "            <o:AllowPNG/>\n" +
+                "            <o:PixelsPerInch>96</o:PixelsPerInch>\n" +
+                "        </o:OfficeDocumentSettings>\n" +
+                "    </xml>\n" +
+                "    <![endif]-->\n";
     }
 
     private String buildEmailHeader(String formattedDate) {
-        return "                    <!-- Header with enhanced gradient and better text visibility -->\n" +
+        return "                    <!-- Header with Outlook VML gradient support -->\n" +
                 "                    <tr>\n" +
-                "                        <td style=\"background: linear-gradient(135deg, #006A4E 0%, #00A693 100%); padding: 30px; text-align: center;\" class=\"header-gradient\">\n" +
-                "                                        <h1 style=\"background: transparent;margin: 0; font-size: 32px; font-weight: 400; color: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.4); letter-spacing: -0.5px;\">📊 Surveillance Data Load Report</h1>\n" +
-                "                                        <div style=\"background: transparent;font-size: 20px; color: #ffffff !important; margin-top: 12px; font-family: 'Segoe UI', Arial, sans-serif; font-weight: 300; text-shadow: 0 1px 2px rgba(0,0,0,0.3);\">" + formattedDate + "</div>\n" +
+                "                        <td style=\"background-color: #006A4E; padding: 30px; text-align: center;\">\n" +
+                "                            <!--[if gte mso 9]>\n" +
+                "                            <v:rect xmlns:v=\"urn:schemas-microsoft-com:vml\" fill=\"true\" stroke=\"false\" style=\"width:100%;height:120px;\">\n" +
+                "                                <v:fill type=\"gradient\" color=\"#006A4E\" color2=\"#00A693\" angle=\"135\" />\n" +
+                "                                <v:textbox inset=\"0,0,0,0\">\n" +
+                "                            <![endif]-->\n" +
+                "                            <div style=\"background: linear-gradient(135deg, #006A4E 0%, #00A693 100%); background-color: #006A4E; padding: 0; margin: 0;\">\n" +
+                "                                <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background: transparent;\">\n" +
+                "                                    <tr>\n" +
+                "                                        <td style=\"text-align: center; padding: 0; background: transparent;\">\n" +
+                "                                            <h1 style=\"margin: 0; font-size: 32px; font-weight: 400; color: #ffffff !important; font-family: Arial, Helvetica, sans-serif; text-shadow: none; letter-spacing: -0.5px; padding: 0; background: transparent;\">📊 Surveillance Data Load Report</h1>\n" +
+                "                                            <div style=\"font-size: 20px; color: #ffffff !important; margin-top: 12px; font-family: Arial, Helvetica, sans-serif; font-weight: 300; padding: 0; background: transparent;\">" + formattedDate + "</div>\n" +
+                "                                        </td>\n" +
+                "                                    </tr>\n" +
+                "                                </table>\n" +
+                "                            </div>\n" +
+                "                            <!--[if gte mso 9]>\n" +
+                "                                </v:textbox>\n" +
+                "                            </v:rect>\n" +
+                "                            <![endif]-->\n" +
                 "                        </td>\n" +
                 "                    </tr>\n";
     }
@@ -220,35 +250,69 @@ public class BatchReportService {
                                            long completeSummaries, long missingScenarios) {
         return "                    <!-- Overview Stats -->\n" +
                 "                    <tr>\n" +
-                "                        <td style=\"background-color: #e8f5f1 !important; padding: 20px;\" class=\"stats-bg\" bgcolor=\"#e8f5f1\">\n" +
+                "                        <td style=\"background-color: #e8f5f1; padding: 20px;\" bgcolor=\"#e8f5f1\">\n" +
+                "                            <!--[if (gte mso 9)|(IE)]>\n" +
+                "                            <table width=\"100%\" align=\"center\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n" +
+                "                            <tr>\n" +
+                "                            <![endif]-->\n" +
                 "                            <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" class=\"content-table\">\n" +
                 "                                <tr>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", totalLoaded) + "</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">SCENARIOS LOADED</div>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">" + String.format("%,d", totalLoaded) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">SCENARIOS LOADED</div>\n" +
                 "                                    </td>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", totalExpected) + "</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">EXPECTED SCENARIOS</div>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
                 "                                    </td>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%.1f%%", completionRate) + "</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">COMPLETION RATE</div>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">" + String.format("%,d", totalExpected) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">EXPECTED SCENARIOS</div>\n" +
                 "                                    </td>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", completeSummaries) + "</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">COMPLETE GROUPS</div>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
                 "                                    </td>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">" + String.format("%,d", missingScenarios) + "</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">MISSING SCENARIOS</div>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">" + String.format("%.1f%%", completionRate) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">COMPLETION RATE</div>\n" +
                 "                                    </td>\n" +
-                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%;\">\n" +
-                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, sans-serif;\">📋</div>\n" +
-                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, sans-serif; letter-spacing: 0.5px;\">REPORT STATUS</div>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
                 "                                    </td>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">" + String.format("%,d", completeSummaries) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">COMPLETE GROUPS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
+                "                                    </td>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">" + String.format("%,d", missingScenarios) + "</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">MISSING SCENARIOS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
+                "                                    </td>\n" +
+                "                                    <td width=\"150\" align=\"center\" valign=\"top\">\n" +
+                "                                    <![endif]-->\n" +
+                "                                    <td align=\"center\" style=\"padding: 10px; width: 16.66%; vertical-align: top;\">\n" +
+                "                                        <div style=\"font-size: 28px; font-weight: bold; color: #006A4E; font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0;\">📋</div>\n" +
+                "                                        <div style=\"font-size: 11px; color: #666; text-transform: uppercase; font-family: Arial, Helvetica, sans-serif; letter-spacing: 0.5px; margin: 5px 0 0 0; padding: 0;\">REPORT STATUS</div>\n" +
+                "                                    </td>\n" +
+                "                                    <!--[if (gte mso 9)|(IE)]>\n" +
+                "                                    </td>\n" +
+                "                                    <![endif]-->\n" +
                 "                                </tr>\n" +
                 "                            </table>\n" +
+                "                            <!--[if (gte mso 9)|(IE)]>\n" +
+                "                            </tr>\n" +
+                "                            </table>\n" +
+                "                            <![endif]-->\n" +
                 "                        </td>\n" +
                 "                    </tr>\n";
     }
